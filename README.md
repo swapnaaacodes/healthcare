@@ -104,9 +104,9 @@ health_risk_project/
 ## ▶️ How to Run the Project
 
 In the terminal write
-cd src
-python train.py
-python predict.py
+✔ cd src
+✔ python train.py
+✔ python predict.py
 
 before that
 
