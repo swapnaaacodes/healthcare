@@ -5,14 +5,14 @@ import joblib
 import pandas as pd
 import plotly.express as px
 
-# 1️⃣ Load best model
+#Load best model
 models_dir = os.path.join("..", "models")
 model_path = os.path.join(models_dir, "best_model.joblib")
 model = joblib.load(model_path)
 
 print(" Best model loaded!\n")
 
-# 2️⃣ Multiple patient input data
+#Multiple patient input data
 patients_data = [
     {
         "Name": "Rohit",
@@ -63,19 +63,19 @@ patients_data = [
 
 df_new = pd.DataFrame(patients_data)
 
-# 3️⃣ Predict using trained model (No manual threshold)
+#Predict using trained model 
 predictions = model.predict(df_new.drop(columns=["Name"]))
 df_new["Predicted Risk"] = predictions
 
 print("🧍‍♂️ Patients and Predictions:\n")
 print(df_new)
 
-# 4️⃣ Save predictions to CSV (for your report/demo)
+#Save predictions to CSV 
 output_path = os.path.join("..", "models", "predictions_output.csv")
 df_new.to_csv(output_path, index=False)
 print(f"\n Saved predictions table to: {output_path}")
 
-# 5️⃣ Plot graph: High Risk vs Low Risk count
+# Plot graph
 fig = px.bar(
     df_new["Predicted Risk"].value_counts().reset_index(),
     x="index",
