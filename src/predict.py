@@ -1,91 +1,62 @@
-# src/predict.py
-
-import os
 import joblib
 import pandas as pd
-import plotly.express as px
+import os
 
-#Load best model
-models_dir = os.path.join("..", "models")
-model_path = os.path.join(models_dir, "best_model.joblib")
-model = joblib.load(model_path)
+# Load model & encoder
+model = joblib.load("../models/best_model.joblib")
+le = joblib.load("../models/label_encoder.joblib")
 
-print(" Best model loaded!\n")
-
-#Multiple patient input data
-patients_data = [
+# Sample patients
+patients = pd.DataFrame([
     {
         "Name": "Rohit",
         "Heart Rate": 120,
         "Respiratory Rate": 24,
-        "Body Temperature": 38.4,
+        "Body Temperature": 38.5,
         "Oxygen Saturation": 89,
         "Age": 65,
         "Gender": "Male"
     },
     {
         "Name": "Priya",
-        "Heart Rate": 85,
+        "Heart Rate": 82,
         "Respiratory Rate": 18,
-        "Body Temperature": 37.1,
-        "Oxygen Saturation": 96,
-        "Age": 30,
+        "Body Temperature": 37.0,
+        "Oxygen Saturation": 97,
+        "Age": 28,
         "Gender": "Female"
-    },
-    {
-        "Name": "Rahul",
-        "Heart Rate": 105,
-        "Respiratory Rate": 20,
-        "Body Temperature": 38.0,
-        "Oxygen Saturation": 91,
-        "Age": 54,
-        "Gender": "Male"
-    },
-    {
-        "Name": "Anita",
-        "Heart Rate": 70,
-        "Respiratory Rate": 16,
-        "Body Temperature": 36.9,
-        "Oxygen Saturation": 98,
-        "Age": 22,
-        "Gender": "Female"
-    },
-    {
-        "Name": "Vikas",
-        "Heart Rate": 130,
-        "Respiratory Rate": 30,
-        "Body Temperature": 39.0,
-        "Oxygen Saturation": 85,
-        "Age": 75,
-        "Gender": "Male"
     }
-]
+])
 
-df_new = pd.DataFrame(patients_data)
+# Feature Engineering
+patients["Oxygen_Deficit"] = 100 - patients["Oxygen Saturation"]
+patients["HR_per_Age"] = patients["Heart Rate"] / (patients["Age"] + 1)
+patients["Stress_Index"] = patients["Heart Rate"] * patients["Respiratory Rate"]
+patients["Temp_Risk"] = patients["Body Temperature"] * patients["Respiratory Rate"]
 
-#Predict using trained model 
-predictions = model.predict(df_new.drop(columns=["Name"]))
-df_new["Predicted Risk"] = predictions
+patients["Severe_Condition"] = (
+    (patients["Oxygen Saturation"] < 92) &
+    (patients["Heart Rate"] > 100)
+).astype(int)
 
-print("🧍‍♂️ Patients and Predictions:\n")
-print(df_new)
+patients["Fever_Flag"] = (patients["Body Temperature"] > 38).astype(int)
 
-#Save predictions to CSV 
-output_path = os.path.join("..", "models", "predictions_output.csv")
-df_new.to_csv(output_path, index=False)
-print(f"\n Saved predictions table to: {output_path}")
+# Keep features only
+X = patients.drop(columns=["Name"])
 
-# Plot graph
-fig = px.bar(
-    df_new["Predicted Risk"].value_counts().reset_index(),
-    x="index",
-    y="Predicted Risk",
-    title="Prediction Count (High vs Low Risk)",
-    labels={"index": "Risk Category", "Predicted Risk": "Count"},
-    text="Predicted Risk"
-)
-fig.update_traces(textposition="outside")
-fig.show()
+# Prediction
+preds = model.predict(X)
+probs = model.predict_proba(X)
 
-print("\n Graph displayed successfully!")
-print("🎉 Prediction Complete!")
+patients["Predicted Risk"] = le.inverse_transform(preds)
+patients["Confidence"] = probs.max(axis=1)
+patients["High Risk Probability"] = probs[:, 1]
+
+print("\nPrediction Results:\n")
+print(patients)
+
+# Save CSV
+os.makedirs("../models", exist_ok=True)
+patients.to_csv("../models/predictions_output.csv", index=False)
+
+print("\nSaved to models/predictions_output.csv")

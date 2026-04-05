@@ -1,165 +1,180 @@
-# src/train.py
-
 import os
 import joblib
 import numpy as np
 import pandas as pd
-import plotly.express as px
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+from sklearn.inspection import permutation_importance
 
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score,
-    f1_score, confusion_matrix, classification_report
-)
-
-#Load Dataset
-
+# =========================
+# Load Data
+# =========================
 data_path = os.path.join("..", "data", "healthcareinfo.csv")
-df = pd.read_csv(data_path)
+df = pd.read_csv(data_path).dropna()
 
-print("📌 Dataset loaded")
-print(df.head(), "\n")
+# =========================
+# Feature Engineering
+# =========================
+df["Oxygen_Deficit"] = 100 - df["Oxygen Saturation"]
+df["HR_per_Age"] = df["Heart Rate"] / (df["Age"] + 1)
+df["Stress_Index"] = df["Heart Rate"] * df["Respiratory Rate"]
+df["Temp_Risk"] = df["Body Temperature"] * df["Respiratory Rate"]
 
-df = df.dropna()
-print("✔ After dropping empty rows:", df.shape)
+df["Severe_Condition"] = (
+    (df["Oxygen Saturation"] < 92) &
+    (df["Heart Rate"] > 100)
+).astype(int)
 
-#Feature Selection
+df["Fever_Flag"] = (df["Body Temperature"] > 38).astype(int)
 
+# =========================
+# Features & Target
+# =========================
 features = [
     "Heart Rate", "Respiratory Rate", "Body Temperature",
-    "Oxygen Saturation", "Age", "Gender"
+    "Oxygen Saturation", "Age", "Gender",
+    "Oxygen_Deficit", "HR_per_Age", "Stress_Index", "Temp_Risk",
+    "Severe_Condition", "Fever_Flag"
 ]
+
 target = "Risk Category"
 
 X = df[features]
 y = df[target]
 
+# Encode target
+le = LabelEncoder()
+y = le.fit_transform(y)
+
+os.makedirs("../models", exist_ok=True)
+joblib.dump(le, "../models/label_encoder.joblib")
+
+# =========================
+# Train Test Split
+# =========================
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, stratify=y, random_state=42
 )
 
-#Preprocessing 
-
+# =========================
+# Preprocessing
+# =========================
 numeric_features = [
     "Heart Rate", "Respiratory Rate", "Body Temperature",
-    "Oxygen Saturation", "Age"
+    "Oxygen Saturation", "Age",
+    "Oxygen_Deficit", "HR_per_Age", "Stress_Index", "Temp_Risk",
+    "Severe_Condition", "Fever_Flag"
 ]
+
 categorical_features = ["Gender"]
 
-preprocessor = ColumnTransformer(
-    transformers=[
-        ("num", StandardScaler(), numeric_features),
-        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
-    ]
-)
+preprocessor = ColumnTransformer([
+    ("num", StandardScaler(), numeric_features),
+    ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
+])
 
-#Models to Train
+# =========================
+# Model
+# =========================
+pipeline = Pipeline([
+    ("preprocess", preprocessor),
+    ("model", SVC(probability=True, class_weight="balanced"))
+])
 
-models = {
-    "Logistic Regression": LogisticRegression(max_iter=2000, random_state=42),
-    "Decision Tree": DecisionTreeClassifier(random_state=42),
-    "Random Forest": RandomForestClassifier(n_estimators=200, random_state=42),
-    "SVC": SVC(kernel="rbf", probability=True, random_state=42),
+param_grid = {
+    "model__C": [0.5, 1, 5, 10],
+    "model__gamma": ["scale", 0.1, 0.01],
+    "model__kernel": ["rbf"]
 }
 
-results = []
-best_model = None
-best_name = ""
-best_f1 = -1.0
-
-print("\n Training Models...\n")
-
-for name, model in models.items():
-    pipe = Pipeline(steps=[
-        ("preprocess", preprocessor),
-        ("model", model),
-    ])
-    
-    pipe.fit(X_train, y_train)
-    y_pred = pipe.predict(X_test)
-
-    acc = accuracy_score(y_test, y_pred)
-    prec = precision_score(y_test, y_pred, average="weighted", zero_division=0)
-    rec = recall_score(y_test, y_pred, average="weighted", zero_division=0)
-    f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-
-    results.append((name, acc, prec, rec, f1))
-
-    print(f"📌 {name}")
-    print(f" Accuracy : {acc:.4f}")
-    print(f" Precision: {prec:.4f}")
-    print(f" Recall   : {rec:.4f}")
-    print(f" F1 Score : {f1:.4f}")
-    print(" Confusion:\n", confusion_matrix(y_test, y_pred))
-    print(" Report:\n", classification_report(y_test, y_pred))
-    print("-" * 60)
-
-    if f1 > best_f1:
-        best_f1 = f1
-        best_name = name
-        best_model = pipe
-
-print("\n🏆 Best Model:", best_name, f"(F1={best_f1:.4f})")
-
-#Save Results 
-
-results_dir = os.path.join("..", "models")
-os.makedirs(results_dir, exist_ok=True)
-
-best_model_path = os.path.join(results_dir, "best_model.joblib")
-joblib.dump(best_model, best_model_path)
-print(f"\n💾 Saved best model: {best_model_path}")
-
-# Accuracy Graph
-
-model_names = [r[0] for r in results]
-accuracies = [r[1] for r in results]
-
-fig_acc = px.bar(
-    x=model_names,
-    y=accuracies,
-    title="Model Accuracy Comparison",
-    labels={"x": "Models", "y": "Accuracy"},
-    text=[f"{a:.2f}" for a in accuracies]
+search = RandomizedSearchCV(
+    pipeline,
+    param_distributions=param_grid,
+    n_iter=6,
+    cv=2,
+    scoring="f1_weighted",
+    verbose=2,
+    n_jobs=1,
+    random_state=42
 )
-fig_acc.update_traces(textposition="outside")
-fig_acc.update_layout(yaxis=dict(range=[0, 1]))
-acc_graph_path = os.path.join(results_dir, "model_accuracy_plotly.png")
-fig_acc.write_image(acc_graph_path)
-fig_acc.show()
-print(f"📊 Saved accuracy graph: {acc_graph_path}")
 
-#Feature Importance (if tree model) 
+print("\n🔍 Training Optimized SVC...\n")
+search.fit(X_train, y_train)
 
-if "Random Forest" in best_name or "Decision Tree" in best_name:
-    tree = best_model.named_steps["model"]
-    importances = tree.feature_importances_
-    feat_names = best_model.named_steps["preprocess"].get_feature_names_out()
+best_model = search.best_estimator_
 
-    sorted_idx = np.argsort(importances)[::-1]
-    top_n = min(10, len(sorted_idx))
-    top_features = feat_names[sorted_idx][:top_n]
-    top_values = importances[sorted_idx][:top_n]
+print("\nBest Params:", search.best_params_)
 
-    fig_imp = px.bar(
-        x=top_features,
-        y=top_values,
-        title="Top Feature Importances",
-        labels={"x": "Features", "y": "Importance"}
-    )
-    fig_imp.update_layout(xaxis_tickangle=-45)
-    feat_graph_path = os.path.join(results_dir, "feature_importance_plotly.png")
-    fig_imp.write_image(feat_graph_path)
-    fig_imp.show()
-    print(f"🌟 Feature importance saved: {feat_graph_path}")
+# =========================
+# Evaluation
+# =========================
+y_pred = best_model.predict(X_test)
+
+acc = accuracy_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred, average="weighted")
+
+print("\nAccuracy:", round(acc, 4))
+print("F1 Score:", round(f1, 4))
+
+# =========================
+# Save Model
+# =========================
+joblib.dump(best_model, "../models/best_model.joblib")
+
+# =========================
+# Confusion Matrix
+# =========================
+cm = confusion_matrix(y_test, y_pred)
+
+plt.figure()
+sns.heatmap(cm, annot=True, fmt='d')
+plt.title("Confusion Matrix")
+plt.savefig("../models/confusion_matrix.png")
+
+# =========================
+# Prediction Distribution
+# =========================
+plt.figure()
+pd.Series(y_pred).value_counts().plot(kind="bar")
+plt.title("Prediction Distribution")
+plt.savefig("../models/prediction_distribution.png")
+
+# =========================
+# Feature Importance (SAFE)
+# =========================
+print("\nCalculating Permutation Importance...")
+
+result = permutation_importance(
+    best_model,
+    X_test,
+    y_test,
+    n_repeats=2,
+    random_state=42
+)
+
+importance = result.importances_mean
+feature_names = best_model.named_steps["preprocess"].get_feature_names_out()
+
+min_len = min(len(importance), len(feature_names))
+importance = importance[:min_len]
+feature_names = feature_names[:min_len]
+
+plt.figure(figsize=(10,5))
+plt.bar(range(min_len), importance)
+plt.xticks(range(min_len), feature_names, rotation=45, ha="right")
+
+plt.title("Permutation Feature Importance")
+plt.xlabel("Features")
+plt.ylabel("Importance")
+
+plt.tight_layout()
+plt.savefig("../models/feature_importance.png")
 
 print("\n🎉 Training Complete!")
