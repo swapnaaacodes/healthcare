@@ -181,15 +181,6 @@ Confidence: 0.91
 
 ---
 
-## 🚀 Future Improvements
-
-- Add Gradient Boosting / XGBoost  
-- Handle imbalance using SMOTE  
-- Deploy on cloud (Streamlit Cloud / AWS)  
-- Add SHAP for advanced explainability  
-
----
-
 ## 👨‍💻 Author
 
 **Swapna Paul**
